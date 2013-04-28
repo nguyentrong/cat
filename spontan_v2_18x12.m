@@ -1,4 +1,4 @@
-function spontan_v2_1(filename)
+function spontan_v2_18x12(filename)
 % Version infomation:
 % Weighting the matrix in the connectivity function
 
