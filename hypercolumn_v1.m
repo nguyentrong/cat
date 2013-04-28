@@ -1,17 +1,18 @@
-function spontan(filename)
+function hypercolumn%(filename)
 % Version infomation:
 % Weighting the matrix in the connectivity function
 
     %% close and clear all
     close all; 
+    clc;
     warning off;  
     addpath('input');
     
     disp('Starting...');
       
     %% Define global variables
-    global  x y nmass te ti he hi semax simax e0 r0 v0 n sz neqn tstart tend ...
-        map p path signal_cut T
+    global  x y nmass te ti he hi smax e0 r0 v0 n sz neqn tstart tend ...
+        map d p path signal_cut T
      
     %% Load initial data file  
     % te=p(1); ti=p(2); he=p(3); hi=p(4); 
@@ -20,9 +21,10 @@ function spontan(filename)
     % c2s=p(13); c1n=p(14); c1l=p(15);
     disp('Loading initial parameter...');
     %load(['param/' filename '.mat']);
-    load([filename '.mat']);
+    %load([filename '.mat']);
+    load p1x1.mat
     disp(['# te=' num2str(p(1)) 'ms; ti=' num2str(p(2)) 'ms; he=' num2str(p(3)) 'mV; hi=' num2str(p(4)) 'mV;']);
-    disp(['# semax=' num2str(p(5)) '; simax=' num2str(p(6)) '; x=' num2str(p(7)) '; y=' num2str(p(8)) '; sz=' num2str(p(9)) ]);
+    disp(['# smax=' num2str(p(5)) '; d=' num2str(p(6)) '; x=' num2str(p(7)) '; y=' num2str(p(8)) '; sz=' num2str(p(9)) ]);
     disp(['# c1s=' num2str(p(10)) '; c1n=' num2str(p(11),'%.3f') '; c1l=' num2str(p(12),'%.3f')]);
     disp(['# c2s=' num2str(p(13)) '; c2n=' num2str(p(14),'%.3f') '; c2l=' num2str(p(15),'%.3f')]);
     disp(['# tstart=' num2str(p(16)) '; tend=' num2str(p(17))]);
@@ -33,8 +35,8 @@ function spontan(filename)
     ti       = p(2);% 20; % ms
     he       = p(3);% 3.25;  % mV
     hi       = p(4);% -22;% mV
-    semax    = p(5);% 10;
-    simax    = p(6);
+    smax     = p(5);% 10;
+    d        = p(6);
     % parameter of sigmoid function
     e0       = 2.5e-3;% 1/ms
     r0       = 0.56;  % 1/mV
@@ -49,21 +51,31 @@ function spontan(filename)
     % integration time
     tstart   = p(16);   % ms
     tend     = p(17); % ms
-    signal_cut = 1;
+    t        = tstart:sz:tend;
+    signal_cut = 100/sz;
     T        = [];
        
     % Result path
     path     = 'output';
     % Load map    
-    load(['input/map' num2str(x) 'x' num2str(y) '.mat'],'map');
-    map = [map{1}(:) map{2}(:) map{3}(:) map{4}(:) map{5}(:) map{6}(:) map{7}(:) map{8}(:) ];
+    %load(['input/map' num2str(x) 'x' num2str(y) '.mat'],'map');
+    %map = [map{1}(:) map{2}(:) map{3}(:) map{4}(:) map{5}(:) map{6}(:) map{7}(:) map{8}(:) ];
     load input/cmap8OMs.mat   % cmap
     
     %% Solving the ode system
     [OM] = VC_ode();
 
     %% Postprocessing and plot and save
-    postproc(OM);    
+    %postproc(OM);
+    OM = OM(:,2000:end);
+    %OM = OM - repmat(mean(OM,2),1,size(OM,2));
+    for i = 1:8
+       subplot 411; hold on; plot(OM(i,:),'color',cmap(i,:)/255); axis tight; title('Pyramidal');
+       subplot 412; hold on; plot(OM(i+8,:),'color',cmap(i,:)/255);axis tight; title('Excitatory');
+       subplot 413; hold on; plot(OM(i+16,:),'color',cmap(i,:)/255); axis tight; title('Inhibitory');
+       subplot 414; hold on; plot(OM(i,:)+OM(i+8,:)+OM(i+16,:),'color',cmap(i,:)/255); axis tight; title('EEG');
+    end
+    
     
     disp('Finished!');
 end
@@ -71,11 +83,14 @@ end
 function [OM] = VC_ode()
 %% ODE solver using Euler method with constant stepsize 
 
-global te ti he hi e0 r0 v0 nmass tstart sz tend signal_cut
+global te ti he hi e0 r0 v0 nmass tstart sz tend d p smax signal_cut
 
 % The connectivity and the weighting matrix
 disp('Loading the connectivity matrix...');
-[W] = connectivity(); 
+[W wtM] = localConnectivity();
+W = W/smax^2;
+%W = wtM*W;
+%clear wtM
     
 % modify the connectivity
 ke = he/te; ki = hi/ti;
@@ -83,7 +98,7 @@ K  = [repmat(ke,2*nmass/3,1); repmat(ki,nmass/3,1)];
 T1 = [repmat(-2/te,2*nmass/3,1); repmat(-2/ti,nmass/3,1)];
 T2 = [repmat(-1/te^2,2*nmass/3,1); repmat(-1/ti^2,nmass/3,1)];
 
-trunk = 200;
+trunk = 50;
 n_trunk = ceil(tend/trunk/sz);
 
 %%
@@ -91,15 +106,18 @@ n_trunk = ceil(tend/trunk/sz);
 %%
 % wtM = ones(nmass,1);
 OM = [];  % Orientation map
-Y0 = [zeros(nmass,1); zeros(nmass,1)];% Initial condition
-Y0(1) = -70; Y0(nmass+1) = -70;
+Y0 = [-70*ones(nmass,1); zeros(nmass,1)];% Initial condition
 dv = zeros(nmass,1);
 du = dv;
 
-% additional info
 fprintf('Solver main loop...\n');
+
+% additional info
 trunkidx = 1; 
-fprintf('Total %d:\t',n_trunk);
+tic;
+c1s = p(10); c1n = p(11); c1l = p(12);
+c2s = p(13); c2n = p(14); c2l = p(15);
+fprintf('[%.2f %.2f %.2f %.2f](%d):\n',te,ti,he,hi,n_trunk);
 
 for idx = 1:length(tstart:sz:tend)      
     % Update half of Y0   
@@ -110,13 +128,33 @@ for idx = 1:length(tstart:sz:tend)
     S = 2*e0 ./ (1+exp(r0*(v0-u))); 
     
     % Weight S by the quotient h/tau  
-    S = W*S;  
+    S = W*S;
+    if idx > signal_cut
+        tmp = u(1:nmass/3)+u(nmass/3+1:2*nmass/3)+u(2*nmass/3+1:nmass);
+        [maxC_val maxC_idx] = max(tmp);
+        wtM_ex = repmat(c1l,nmass/3,1); % all states = last state = min
+        wtM_in = repmat(c2l,nmass/3,1); % all states = last state = max            
+        wtM_ex(maxC_idx) = c1s; % current state = 1
+        wtM_in(maxC_idx) = c2s; % current state = 1
+        if maxC_idx < 8            
+            wtM_ex(maxC_idx+1) = c1n; % next state = max
+            wtM_in(maxC_idx+1) = c2n; % next state = min      
+        else            
+            wtM_ex(1) = c1n; % next state = max
+            wtM_in(1) = c2n; % next state = min 
+        end 
+        wtM = [wtM_ex; wtM_ex; wtM_in];        
+    else
+        wtM = ones(nmass,1);
+    end
+    S = wtM.*S;
+    S = K.*S;  
        
     % ODEs 
     du = v;
     %dv(1:2*end/3)     = -2/te * v(1:2*end/3)     - 1/te^2 * u(1:2*end/3)     + S(1:2*end/3);
     %dv(2*end/3+1:end) = -2/ti * v(2*end/3+1:end) - 1/ti^2 * u(2*end/3+1:end) + S(2*end/3+1:end);          
-    dv = T1.*v + T2.*u + K.*S;          
+    dv = T1.*v + T2.*u + S;          
     
     % no noise
     % dY = [du; dv]
@@ -126,13 +164,17 @@ for idx = 1:length(tstart:sz:tend)
     Y0 = Y1;
        
     % Save result in each step   
-    if idx > signal_cut 
-        OM = [OM single(det_om(u))];
+    if ~mod(idx,d) && idx > signal_cut 
+        %OM = [OM single(det_om(u))];
+        %OM = [OM u(1:end/3)+u(end/3+1:2*end/3)+u(2*end/3+1:end)];
+        OM = [OM u];
     end
       
     if ~mod(idx,trunk)
        % display the informations
-       fprintf(1,'\b%d',trunkidx);
+       estTime = toc;
+       fprintf('%.3d(%.1fs) ',trunkidx,estTime);
+       if ~mod(trunkidx,5); fprintf('\n'); end;
        trunkidx = trunkidx + 1;
        tic;
     end
@@ -143,9 +185,8 @@ end
     
 end
 
-
 function postproc(OM)
-    global x y te ti he hi path p 
+    global x y te ti he hi smax path p 
    
     disp('Postprocessing...');
   
@@ -153,12 +194,12 @@ function postproc(OM)
     currentTime = [num2str(currentTime(1)) '-'  num2str(currentTime(2)) '-'  num2str(currentTime(3)) '-' ...
                    num2str(currentTime(4)) '-'  num2str(currentTime(5)) '-'  num2str(currentTime(6),'%.0f')];      
     fname = ['Spontan_' num2str(x) 'x' num2str(y) '_te=' num2str(te) ...
-        '_ti=' num2str(ti) '_he=' num2str(he) '_hi=' num2str(hi) '_semax=' num2str(p(5)) '_simax=' num2str(p(6))...
+        '_ti=' num2str(ti) '_he=' num2str(he) '_hi=' num2str(hi) '_smax=' num2str(smax) ...
         '_c1s=' num2str(p(10)) '_c1n=' num2str(p(11)) '_c1l=' num2str(p(12)) ...
         '_c2s=' num2str(p(13)) '_c2n=' num2str(p(14)) '_c2l=' num2str(p(15)) ];%...       
         %'_' currentTime ];
         
-    load input/map18x12.mat map
+    load input/map31x21.mat map
     map = [map{1}(:) map{2}(:) map{3}(:) map{4}(:) map{5}(:) map{6}(:) map{7}(:) map{8}(:)];
     T = [];
     for ii = 1:size(OM,2) 
@@ -211,33 +252,100 @@ function [out] = det_om(Y)
     out = sum(out,2);
 end
 
-function [W] = connectivity()
-% ?nderung am 23.04.13: Die Winkeldifferenz zwischen 157.5 und 0 is 22.5 
-% (nicht 157.5 wie vorher)
-
-    global x y p semax simax 
+function [W wtM] = localConnectivity()
+global p
+%% The connectivity
+    angle_min = 0;
+    angle_max = 180;
+    d_angle   = 22.5;
+    angle     = angle_min:d_angle:angle_max-d_angle;
     
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    %% %%%%%%%%%%%%%%%%%% Weighting Matrix
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    disp('# the weighting matrix');  
-    c1s = p(10); c1n = p(11); c1l = p(12);
-    c2s = p(13); c2n = p(14); c2l = p(15);   
-    % Pyramidal and excitatory  
-    tmp1 = [repmat(c1s,x*y,x*y) repmat(c1n,x*y,x*y) repmat(c1l,x*y,6*x*y)];
-    wtMp = tmp1;
-    % Inhibitory  
-    tmp2 = [repmat(c2s,x*y,x*y) repmat(c2n,x*y,x*y) repmat(c2l,x*y,6*x*y)];
-    wtMi = tmp2;
-    for i = 1:7
-        wtMp = [wtMp; circshift(tmp1,[0 i*x*y])];
-        wtMi = [wtMi; circshift(tmp2,[0 i*x*y])];
+    sel_mat = 255*255;
+    
+    % Orientation differences
+    orientation_difference = [];
+    for i = 1:8
+        tmp = [];
+       for j = 1:8
+           tmp = [tmp abs(angle(i)-angle(j))];
+       end
+       orientation_difference = [orientation_difference; tmp];
     end
-    clear tmp1 tmp2
-   
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    %% %%%%%%%%%%%%%%%%%% Connectivity Matrix
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    
+    % There is only local connection between the masses
+    diffAngleLocal = orientation_difference;
+    diffAngleLocal(diffAngleLocal>40) = NaN;
+    Wpp_local = sel_mat*0.01.*exp(-0.0072*diffAngleLocal); Wpp_local(isnan(Wpp_local)) = 0; 
+
+    % P->eN = local + distal
+    Wpe_local = Wpp_local;
+    % P->iN = local + distal
+    Wpi_local = Wpp_local;
+    % Wp = [Wpp Wpe Wpi];
+    Wp = [Wpp_local Wpe_local Wpi_local];
+
+    % Excitatory interneuron 
+    % eN->P = local
+    Wep = Wpp_local;
+    % eN->eN = local
+    Wee = Wpp_local;
+    % eN->iN = local
+    Wei = Wpp_local;
+    % We = [Wep Wee Wei];
+    We = [Wep Wee Wei];
+
+    % Inhibitory interneuron 
+    % iN->P = local
+    diffAngleLocal = orientation_difference;
+    diffAngleLocal(diffAngleLocal>60) = NaN;
+
+    Wip_local = sel_mat*0.08.*exp(-0.038*diffAngleLocal); 
+    Wip_local(isnan(Wip_local)) = 0; 
+    Wip = Wip_local; 
+
+    % iN-eN = local
+    Wie_local = Wip_local;
+
+    % iN-iN = local
+    Wii_local = sel_mat*0.04.*exp(-0.038*diffAngleLocal); 
+    Wii_local(isnan(Wii_local)) = 0; 
+
+    Wi = [Wip Wie_local Wii_local];   
+    
+    W = [Wp; We; Wi];
+    W = W';
+    
+%% The weighting matrix    
+    c1s = p(10); c1n = p(11); c1l = p(12);
+    c2s = p(13); c2n = p(14); c2l = p(15);
+    
+    wtMp = [c1s c1l c1l c1l c1l c1l c1l c1n;
+            c1n c1s c1l c1l c1l c1l c1l c1l;
+            c1l c1n c1s c1l c1l c1l c1l c1l;
+            c1l c1l c1n c1s c1l c1l c1l c1l;
+            c1l c1l c1l c1n c1s c1l c1l c1l;
+            c1l c1l c1l c1l c1n c1s c1l c1l;
+            c1l c1l c1l c1l c1l c1n c1s c1l;
+            c1l c1l c1l c1l c1l c1l c1n c1s ];
+        
+     wtMi = [c1s c1l c1n c1n c1n c1n c1n c1n;
+            c1n c1s c1l c1n c1n c1n c1n c1n;
+            c1n c1n c1s c1l c1n c1n c1n c1n;
+            c1n c1n c1n c1s c1l c1n c1n c1n;
+            c1n c1n c1n c1n c1s c1l c1n c1n;
+            c1n c1n c1n c1n c1n c1s c1l c1n;
+            c1n c1n c1n c1n c1n c1n c1s c1l;
+            c1n c1n c1n c1n c1n c1n c1n c1s ];    
+        
+    wtM = blkdiag(wtMp, wtMp, wtMi);    
+    
+
+end
+
+function [W wtM] = connectivity()
+    global x y p
+
+    %disp('CONNFUN::Start determining the connectivity...')
     disp('# the connectivity');
     % Sensitive angle
     angle_min = 0;
@@ -246,7 +354,7 @@ function [W] = connectivity()
     angle     = angle_min:d_angle:angle_max-d_angle;
 
     % Sample factor
-    sample_factor = 1/5;
+    sample_factor = 1/3;
 
     %% Load images and estimate the position of pixel
     %disp('CONNFUN::Load images and estimate the position of pixel');
@@ -268,6 +376,27 @@ function [W] = connectivity()
         map{ii} = im2;      
     end
 
+
+    %% Formula of the connectivity 
+    % (see our paper for references)
+    % P: Pyramidal
+    % eN: excitatory interneuron
+    % iN: inhibitory interneuron
+
+    %% No spatial dependence
+    % wle = s_x*s_y*0.01*exp(-0.23*abs(dangle));   Long-range: P -> P; P -> eN
+    % wli = s_x*s_y*0.03*exp(-0.023*abs(dangle));  Long-range: P -> iN
+    % wie = s_x*s_y*0.08*exp(-0.038*abs(dangle));  Short-range: iN -> P; iN -> eN
+    % wii = s_x*s_y*0.04*exp(-0.038*abs(dangle));  Short-range: iN -> iN
+    % wex = s_x*s_y*0.01*exp(-0.0072*abs(dangle)); Short-range: P -> P;
+    % s_x and s_y are sensitivity at (x,y) 
+    % dangle = the difference between 2 preffered orientation
+    % r = distance between 2 neurons
+
+    %% Blumenfeld said: The result will not depend on if we take the spatial dependences 
+    %% into account or not (I also believe it) that's why I only computed the 2nd case
+    %% I will test this hypothese for the first case but not now :)
+
     % Number of column and row
     [nrow ncol] = size(im2);
     n = nrow * ncol; 
@@ -285,9 +414,6 @@ function [W] = connectivity()
     %disp('CONNFUN::Estimate the matrix of orientation differences');    
     tmp1 = []; for ii = 1:8; tmp1 = [tmp1; repmat(angle(ii),x*y,len)] ; end 
     orientation_difference = abs(tmp1-tmp1');
-    orientation_difference(orientation_difference==157.5) = 22.5;
-    orientation_difference(orientation_difference==135) = 45;
-    orientation_difference(orientation_difference==112.5) = 67.5;
 
     % orientation_difference_local = [];  % Orientation difference for local connections
     % orientation_difference_distal = []; % Orientation difference for distal connections
@@ -335,7 +461,7 @@ function [W] = connectivity()
     %% Calculate the matrices
     %disp('CONNFUN::Calculate the matrices'); 
 
-    %% Formula
+    %% Richtig
     % wle = s_x*s_y*0.01*exp(-0.23*abs(dangle));   Long-range: P -> P; P -> eN (>60? -> 0)
     % wli = s_x*s_y*0.03*exp(-0.023*abs(dangle));  Long-range: P -> iN (>60? -> 0)
     % wie = s_x*s_y*0.08*exp(-0.038*abs(dangle));  Short-range: iN -> P; iN -> eN (>60? -> 0)
@@ -349,8 +475,8 @@ function [W] = connectivity()
     diffAngleLocal(diffAngleLocal>40) = NaN;
     diffAngleDistal(diffAngleDistal>60) = NaN;
 
-    Wpp_local = sel_mat/semax/semax*0.01.*exp(-0.0072*diffAngleLocal); Wpp_local(isnan(Wpp_local)) = 0; 
-    Wpp_distal = sel_mat/semax/semax*0.01.*exp(-0.23*diffAngleDistal); Wpp_distal(isnan(Wpp_distal)) = 0; 
+    Wpp_local = sel_mat*0.01.*exp(-0.0072*diffAngleLocal); Wpp_local(isnan(Wpp_local)) = 0; 
+    Wpp_distal = sel_mat*0.01.*exp(-0.23*diffAngleDistal); Wpp_distal(isnan(Wpp_distal)) = 0; 
     Wpp = Wpp_distal + Wpp_local;
 
     % P->eN = local + distal
@@ -358,11 +484,12 @@ function [W] = connectivity()
 
     % P->iN = local + distal
     Wpi_local = Wpp_local;
-    Wpi_distal = sel_mat/semax/simax*0.03.*exp(-0.023*diffAngleDistal); Wpi_distal(isnan(Wpi_distal)) = 0; 
+    Wpi_distal = sel_mat*0.03.*exp(-0.023*diffAngleDistal); Wpi_distal(isnan(Wpi_distal)) = 0; 
     Wpi = Wpi_local + Wpi_distal;
 
     % Wp = [Wpp Wpe Wpi];
-    Wp = [wtMp.*Wpp wtMp.*Wpe wtMi.*Wpi];
+    Wp = [Wpp Wpe Wpi];
+
     clear Wpp_distal Wpp Wpe Wpi_local Wpi_local
 
     %% Excitatory interneuron 
@@ -373,7 +500,7 @@ function [W] = connectivity()
     % eN->iN = local
     Wei = Wpp_local;
     % We = [Wep Wee Wei];
-    We = [wtMp.*Wep wtMp.*Wee wtMi.*Wei];
+    We = [Wep Wee Wei];
     clear Wep Wee Wei
 
     %% Inhibitory interneuron 
@@ -381,7 +508,7 @@ function [W] = connectivity()
     diffAngleLocal = orientation_difference_local;
     diffAngleLocal(diffAngleLocal>60) = NaN;
 
-    Wip_local = sel_mat/semax/simax*0.08.*exp(-0.038*diffAngleLocal); 
+    Wip_local = sel_mat*0.08.*exp(-0.038*diffAngleLocal); 
     Wip_local(isnan(Wip_local)) = 0; 
     Wip = Wip_local; 
 
@@ -389,11 +516,10 @@ function [W] = connectivity()
     Wie_local = Wip_local;
 
     % iN-iN = local
-    Wii_local = sel_mat/simax/simax*0.04.*exp(-0.038*diffAngleLocal); 
+    Wii_local = sel_mat*0.04.*exp(-0.038*diffAngleLocal); 
     Wii_local(isnan(Wii_local)) = 0; 
 
-    % Weight Wi by the asymmetric coefficients
-    Wi = [wtMi.*Wip wtMi.*Wie_local wtMi.*Wii_local];
+    Wi = [Wip Wie_local Wii_local];
 
     clear Wie_local Wii_local Wip Wpi Wpp Wpe orientation_difference* sel_mat
 
@@ -401,7 +527,33 @@ function [W] = connectivity()
 
     W = W';
 
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    %% %%%%%%%%%%%%%%%%%% Weighting Matrix
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%     disp('# the weighting matrix');  
+%     c1s = p(10); c1n = p(11); c1l = p(12);
+%     c2s = p(13); c2n = p(14); c2l = p(15);   
+%     % Pyramidal  
+%     tmp1 = [repmat(c1s,x*y,x*y) repmat(c1l,x*y,x*y) repmat(c1l,x*y,5*x*y) repmat(c1n,x*y,x*y)];
+%     wtMp = tmp1;
+%     tmp2 = [repmat(c2s,x*y,x*y) repmat(c2l,x*y,x*y) repmat(c2l,x*y,5*x*y) repmat(c2n,x*y,x*y)];
+%     wtMi = tmp2;
+%     for i = 1:7
+%         wtMp = [wtMp; circshift(tmp1,[0 i*x*y])];
+%         wtMi = [wtMi; circshift(tmp2,[0 i*x*y])];
+%     end
+%    
+%     % Put all together
+%     %tmp = zeros(size(wtMp));
+%     %wtM = [ wtMp              tmp               tmp; 
+%     %        tmp               wtMp              tmp; 
+%     %        tmp               tmp               wtMi  ];
+%     wtM = blkdiag(wtMp,wtMp,wtMi);
+%     clear wtMp wtMi tmp*
+%         
+    %wtM = wtM';
 end
+
 
 
 
