@@ -1,4 +1,4 @@
-function bifu_v2_18x12(p_filename,res_filename,a1,a2)
+function bifu(p_filename,res_filename,a1,a2)
 % Version infomation:
 % Weighting the matrix in the connectivity function
 
