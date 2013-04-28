@@ -1,4 +1,8 @@
+<<<<<<< HEAD:bifu.m
 function bifu(p_filename,res_filename,se,si,a1,a2)
+=======
+function bifu(p_filename,res_filename,a1,a2)
+>>>>>>> 420fe672a837244b6d6ca9dea3d07a3a69cb9503:bifu.m
 % Version infomation:
 % 1 - Weighting the matrix in the connectivity function
 % 2 - Wichten the selectivity smax unterschiedlich fuer excitatory und inhibitory
